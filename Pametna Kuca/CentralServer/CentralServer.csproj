@@ -49,5 +49,27 @@
   <ItemGroup>
     <None Include="App.config" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ApplianceCommunication\ApplianceCommunication.csproj">
+      <Project>{e6d2d34d-dcf4-4f9d-b5e2-38c069b5a3b5}</Project>
+      <Name>ApplianceCommunication</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\HomeAppliances\HomeAppliances.csproj">
+      <Project>{6a8d78c0-e8e3-49ea-8391-1340dd29c156}</Project>
+      <Name>HomeAppliances</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\Pametna Kuca\Pametna Kuca.csproj">
+      <Project>{2542efe3-c440-47e1-9a2a-3f9d36ad31e0}</Project>
+      <Name>Pametna Kuca</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\UserLibrary\UserLibrary.csproj">
+      <Project>{22024111-4dce-4d67-9d44-324936e1126a}</Project>
+      <Name>UserLibrary</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\User\Client.csproj">
+      <Project>{e95ae7ee-e9d6-473d-8dd6-b5adf04c1e99}</Project>
+      <Name>Client</Name>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
