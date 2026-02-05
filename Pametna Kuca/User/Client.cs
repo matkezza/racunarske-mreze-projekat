@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
 using System.Threading.Tasks;
+using HomeAppliances;
 
 namespace User
 {
@@ -98,16 +99,16 @@ namespace User
                     if (brojBajta > 0)
                     {
 
-                        List<Uredjaj> uredjaji = new List<Uredjaj>();
+                        List<Appliance> uredjaji = new List<Appliance>();
                         using (MemoryStream ms = new MemoryStream(buffer, 0, brojBajta))
                         {
-                            uredjaji = (List<Uredjaj>)formatter.Deserialize(ms);
+                            uredjaji = (List<Appliance>)formatter.Deserialize(ms);
                         }
 
                         Console.WriteLine("Lista dostupnih uređaja:");
                         for (int i = 0; i < uredjaji.Count; i++)
                         {
-                            Console.WriteLine($"{i + 1}. {uredjaji[i].Ime} (Port: {uredjaji[i].Port})");
+                            Console.WriteLine($"{i + 1}. {uredjaji[i].Name} (Port: {uredjaji[i].Port})");
                         }
 
                         int izbor;
@@ -117,11 +118,11 @@ namespace User
                             izbor = Int32.Parse(Console.ReadLine()) - 1;
                         } while (izbor < 0 || izbor >= uredjaji.Count);
 
-                        Uredjaj izabraniUredjaj = uredjaji[izbor];
-                        Console.WriteLine($"Izabrali ste uređaj: {izabraniUredjaj.Ime}");
+                        Appliance izabraniUredjaj = uredjaji[izbor];
+                        Console.WriteLine($"Izabrali ste uređaj: {izabraniUredjaj.Name}");
                         Console.WriteLine("[Ime funkcije, Vrednost]");
                         Console.WriteLine("--------------------------");
-                        foreach (var v in izabraniUredjaj.Funkcije)
+                        foreach (var v in izabraniUredjaj.Functions)
                         {
                             Console.WriteLine("-" + v.ToString());
                         }
@@ -133,7 +134,7 @@ namespace User
                         {
                             Console.WriteLine("Unesite ime funkcije koju želite da promenite:");
                             funkcija = Console.ReadLine().Trim();
-                            foreach (var f in izabraniUredjaj.Funkcije)
+                            foreach (var f in izabraniUredjaj.Functions)
                             {
                                 if (f.Key == funkcija)
                                 {
@@ -148,7 +149,7 @@ namespace User
                             }
                         } while (!provera);
 
-                        initialData = Encoding.UTF8.GetBytes($"{izabraniUredjaj.Ime}:{funkcija}:{vrednost}");
+                        initialData = Encoding.UTF8.GetBytes($"{izabraniUredjaj.Name}:{funkcija}:{vrednost}");
                         using (MemoryStream ms = new MemoryStream())
                         {
                             BinaryFormatter bf = new BinaryFormatter();

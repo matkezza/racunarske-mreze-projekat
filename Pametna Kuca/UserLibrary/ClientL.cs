@@ -72,5 +72,19 @@ namespace UserLibrary
         {
             return $"Name: {Name}, LastName: {LastName}, Username: {Username}, Password: {Password}, Status: {Status}, Port: {Port}";
         }
+
+        public void PrintClientInfo(List<ClientL> clients)
+        {
+            Console.WriteLine("--------------------------------------------------------------------------");
+            Console.WriteLine("| NAME     | LASTNAME       | USERNAME    | LOGGED IN    |PASSWORD       |");
+            Console.WriteLine("--------------------------------------------------------------------------");
+
+            foreach(var client in clients)
+            {
+                Console.WriteLine($"| {client.Name,-8} | {client.LastName,-14} | {client.Username,-11} | {(client.Status ? "Yes" : "No"),-12} | {client.Password,-14} |");
+            }
+                Console.WriteLine("--------------------------------------------------------------------------");
+
+        }
     }
 }
