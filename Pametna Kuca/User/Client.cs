@@ -89,7 +89,8 @@ namespace User
             udpSocket.SendTo(initialData, destinationEP);
             Console.WriteLine($"Poruka poslata serveru: {initialMessage}");
 
-
+           // byte[] requestDevices = Encoding.UTF8.GetBytes("GET_DEVICES");
+            //udpSocket.SendTo(requestDevices, destinationEP);
 
             try
             {

@@ -171,22 +171,18 @@ namespace CentralServer
             if (string.IsNullOrWhiteSpace(msg))
                 return;
 
-            string username;
-            string password;
-
-            if (!_pendingUsername.ContainsKey(clientSocket))
+            string[] parts = msg.Split(':');
+            if (parts.Length != 2)
             {
-                _pendingUsername[clientSocket] = msg.Trim();
-                return; 
-            }
-            else
-            {
-                
-                username = _pendingUsername[clientSocket];
-                password = msg.Trim();
-                _pendingUsername.Remove(clientSocket);
+                SendTcp(clientSocket, "NEUSPESNO");
+                return;
             }
 
+            string username = parts[0];
+            string password = parts[1];
+
+            Console.WriteLine(username);
+            Console.WriteLine(password);
 
             var user = new ClientL().FindClient(_users, username, password);
             if (user == null)
@@ -196,7 +192,7 @@ namespace CentralServer
                 return;
             }
 
-            if (user.Status)
+            if (user.Status)    // ispraviti 
             {
                 SendTcp(clientSocket, "NEUSPESNO");
                 Log($"Login rejected (already active) for '{username}'");

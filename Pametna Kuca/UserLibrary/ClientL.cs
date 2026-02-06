@@ -34,6 +34,8 @@ namespace UserLibrary
 
         public ClientL FindClient(List<ClientL> clients, string username, string password)
         {
+
+
             foreach (var client in clients)
             {
                 if(client.Username == username && client.Password == password)
