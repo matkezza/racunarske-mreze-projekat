@@ -1,10 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading.Tasks;
 using HomeAppliances;
 
 namespace ApplianceCommunication
@@ -13,66 +11,101 @@ namespace ApplianceCommunication
     {
         static void Main(string[] args)
         {
-            int number = 0;
+            int listenPort = 0;
             foreach (var arg in args)
             {
-                Console.WriteLine("Shipment delivered.");
-                number = Int32.Parse(arg);
+                listenPort = Int32.Parse(arg);
             }
+
+            if (listenPort == 0)
+            {
+                Console.WriteLine("Pokretanje: ApplianceCommunication.exe <PORT>");
+                return;
+            }
+
             Socket udpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            IPEndPoint destinationEP = new IPEndPoint(IPAddress.Any, number);
+            IPEndPoint destinationEP = new IPEndPoint(IPAddress.Any, listenPort);
             udpSocket.Bind(destinationEP);
 
-            EndPoint senderEP = new IPEndPoint(IPAddress.Any, 0);   
-            Appliance appliance = new Appliance();
-            List<Appliance> appliances = appliance.ListOfAppliances();
-            bool flag = false;
+            EndPoint senderEP = new IPEndPoint(IPAddress.Any, 0);
 
-            while (!flag)
-            { 
-                byte[] buffer = new byte[1024];
-                try 
-                { 
+            Appliance applianceSeed = new Appliance();
+            List<Appliance> appliances = applianceSeed.ListOfAppliances();
+
+            Console.WriteLine($"[DEVICE] Listening on UDP port {listenPort}...");
+
+            bool stop = false;
+            while (!stop)
+            {
+                byte[] buffer = new byte[4096];
+                try
+                {
                     int bytesReceived = udpSocket.ReceiveFrom(buffer, ref senderEP);
-                    string receivedMessage = Encoding.UTF8.GetString(buffer, 0, bytesReceived);
-                    Console.WriteLine("Message recieved "+ receivedMessage);
-                    if (receivedMessage == "Server is done with work.") 
+                    string receivedMessage = Encoding.UTF8.GetString(buffer, 0, bytesReceived).Trim();
+
+                    if (receivedMessage == "Server is done with work.")
                     {
-                        flag = true;
+                        stop = true;
                         break;
                     }
-                    Console.WriteLine($"Message recieved from {senderEP}, length {bytesReceived}->:{receivedMessage}");
 
+                    Console.WriteLine($"[DEVICE:{listenPort}] From {senderEP} -> {receivedMessage}");
+
+                    // Expect: ApplianceName:Function:Value
                     string[] parts = receivedMessage.Split(':');
-                    Console.WriteLine(parts.Length+" " + parts[0]+ " "+ parts[1] + " " + parts[2]);
+                    if (parts.Length < 3)
+                    {
+                        SendFeedback(udpSocket, senderEP, $"Neispravna komanda: '{receivedMessage}'");
+                        continue;
+                    }
+
+                    string applianceName = parts[0];
+                    string func = parts[1];
+                    string val = parts[2];
+
+                    Appliance target = null;
                     foreach (var app in appliances)
                     {
-                        if (app.Name == parts[0])
+                        if (app.Name == applianceName)
                         {
-                            app.AddCommand(parts[1], parts[2]);
-                            Console.WriteLine("Command added to appliance: " + app.Name);
+                            target = app;
                             break;
                         }
                     }
 
-                    foreach (var app in appliances)
+                    if (target == null)
                     {
-                        Console.WriteLine("Appliance: " + app.Name);
-                        Console.WriteLine("Commands:");
-                        foreach (var command in app.CommandList)
-                        {
-                            Console.WriteLine("- " + command);
-                        }
+                        SendFeedback(udpSocket, senderEP, $"Uređaj '{applianceName}' nije pronađen na portu {listenPort}.");
+                        continue;
                     }
+
+                    target.AddCommand(func, val);
+
+                    // Pretty feedback to server
+                    string feedback = $"{target.Name}: {func} postavljeno na '{val}'.";
+                    SendFeedback(udpSocket, senderEP, feedback);
+
+                    // Print local state
+                    Console.WriteLine(target.GetState());
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine("Error receiving message: " + ex.Message);
                 }
             }
+
             Console.WriteLine("End of appliance.");
             udpSocket.Close();
-            Console.ReadKey();
+        }
+
+        private static void SendFeedback(Socket sock, EndPoint remote, string msg)
+        {
+            try
+            {
+                byte[] fb = Encoding.UTF8.GetBytes(msg);
+                sock.SendTo(fb, remote);
+            }
+            catch { }
         }
     }
 }

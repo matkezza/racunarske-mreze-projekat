@@ -38,8 +38,9 @@ namespace HomeAppliances
         public Appliance()
         {
             appliances = new List<Appliance> {
-            new Appliance("Air Conditioner", 2000, new Dictionary<string, string> { {"current state","off"},{"temperature","22"}}),
-            new Appliance("LED light", 5555, new Dictionary<string, string> { {"WATS","15"},{"color","yellow"},{"blue light","50"} })
+            new Appliance("Air Conditioner", 2000, new Dictionary<string, string> { {"current state","off"},{"temperature","22"},{"mode","cooling"} }),
+            new Appliance("LED light", 5555, new Dictionary<string, string> { {"WATS","15"},{"color","yellow"},{"intensity","50"} }),
+            new Appliance("Gate", 3000, new Dictionary<string, string> { {"state","closed"} })
             };
         }
 
