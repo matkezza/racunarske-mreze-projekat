@@ -219,8 +219,11 @@ namespace CentralServer
             };
             _sessionsByUdpPort[udpPort] = session;
 
-            SendTcp(clientSocket, "USPESNO");
-            SendTcp(clientSocket, udpPort.ToString());
+            //SendTcp(clientSocket, "USPESNO");
+            //SendTcp(clientSocket, udpPort.ToString());
+
+            SendTcp(clientSocket, $"USPESNO:{udpPort}");
+
 
             Log($"Login OK for '{username}'. Assigned UDP port {udpPort}.");
         }

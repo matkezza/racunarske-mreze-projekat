@@ -1,4 +1,4 @@
-﻿using System;
+﻿/*using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -22,6 +22,7 @@ namespace User
             BinaryFormatter formatter = new BinaryFormatter();
             string odgovor = "";
             int brojBajta = 0;
+            int assignedPort = -1;
             try
             {
                 clientSocket.Connect(serverEP);
@@ -56,41 +57,53 @@ namespace User
                 if (clientSocket.Poll(1000 * 1000, SelectMode.SelectRead))
                 {
                     brojBajta = clientSocket.Receive(buffer);
-                    odgovor = Encoding.UTF8.GetString(buffer, 0, brojBajta);
-
-                    Console.WriteLine("Log in: " + odgovor);
+                    odgovor = Encoding.UTF8.GetString(buffer, 0, brojBajta).Trim();
                     clientSocket.Blocking = true;
                 }
+
+                string[] parts = odgovor.Split(':');
+
+                if (parts[0] != "USPESNO")
+                {
+                    Console.WriteLine("Login neuspešan");
+                    goto PONOVNO_LOGOVANJE;
+                }
+
+                assignedPort = int.Parse(parts[1]);
+                Console.WriteLine("UDP port dodeljen: " + assignedPort);
+
+
             }
             while (odgovor != "USPESNO");
 
-            brojBajta = clientSocket.Receive(buffer);
-
-            if(brojBajta > 0)
-            {
-                odgovor = Encoding.UTF8.GetString(buffer, 0, brojBajta);
-                Console.WriteLine("UDP Port->" + odgovor);
-            }
+            
 
             Socket udpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            udpSocket.Bind(new IPEndPoint(IPAddress.Any, 0));
+
 
             EndPoint deviceEndPoint = new IPEndPoint(IPAddress.Any, 0);
-            int assignedPort;
-            IPEndPoint destinationEP = new IPEndPoint(IPAddress.Loopback, 0);
+            
+            IPEndPoint destinationEP = new IPEndPoint(IPAddress.Loopback, assignedPort);
 
-            if(int.TryParse(odgovor, out assignedPort))
-            {
-                destinationEP = new IPEndPoint(IPAddress.Loopback, assignedPort);
-            }
+           
 
             string initialMessage = $"Klijent se povezao na UDP port: {assignedPort}";
             byte[] initialData = Encoding.UTF8.GetBytes(initialMessage);
-
+            
+            
             udpSocket.SendTo(initialData, destinationEP);
             Console.WriteLine($"Poruka poslata serveru: {initialMessage}");
 
-           // byte[] requestDevices = Encoding.UTF8.GetBytes("GET_DEVICES");
-            //udpSocket.SendTo(requestDevices, destinationEP);
+            brojBajta = udpSocket.ReceiveFrom(buffer, ref deviceEndPoint);
+
+
+            List<Appliance> uredjaji;
+            using (MemoryStream ms = new MemoryStream(buffer, 0, brojBajta))
+            {
+                uredjaji = (List<Appliance>)formatter.Deserialize(ms);
+            }
+
 
             try
             {
@@ -100,7 +113,6 @@ namespace User
                     if (brojBajta > 0)
                     {
 
-                        List<Appliance> uredjaji = new List<Appliance>();
                         using (MemoryStream ms = new MemoryStream(buffer, 0, brojBajta))
                         {
                             uredjaji = (List<Appliance>)formatter.Deserialize(ms);
@@ -200,6 +212,117 @@ namespace User
 
 
 
+        }
+    }
+}*/
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.Serialization.Formatters.Binary;
+using System.Text;
+using HomeAppliances;
+
+namespace User
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            IPEndPoint serverEP = new IPEndPoint(IPAddress.Loopback, 50001);
+
+            byte[] buffer = new byte[4096];
+            BinaryFormatter formatter = new BinaryFormatter();
+            string odgovor = "";
+            int assignedPort;
+
+            clientSocket.Connect(serverEP);
+            Console.WriteLine("Povezan na server.");
+
+        LOGIN:
+            Console.Write("Username: ");
+            string u = Console.ReadLine();
+            Console.Write("Password: ");
+            string p = Console.ReadLine();
+
+            clientSocket.Send(Encoding.UTF8.GetBytes($"{u}:{p}"));
+            int rb = clientSocket.Receive(buffer);
+            odgovor = Encoding.UTF8.GetString(buffer, 0, rb);
+
+            if (!odgovor.StartsWith("USPESNO"))
+            {
+                Console.WriteLine("Login neuspešan.");
+                goto LOGIN;
+            }
+
+            assignedPort = int.Parse(odgovor.Split(':')[1]);
+            Console.WriteLine("Login OK. UDP port: " + assignedPort);
+
+            // UDP
+            Socket udpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            udpSocket.Bind(new IPEndPoint(IPAddress.Any, 0));
+            EndPoint ep = new IPEndPoint(IPAddress.Any, 0);
+            IPEndPoint serverUdp = new IPEndPoint(IPAddress.Loopback, assignedPort);
+
+            // javi se serveru
+            udpSocket.SendTo(Encoding.UTF8.GetBytes("HELLO"), serverUdp);
+
+            // === PRVI I JEDINI PRIJEM LISTE ===
+            rb = udpSocket.ReceiveFrom(buffer, ref ep);
+            List<Appliance> uredjaji;
+            using (MemoryStream ms = new MemoryStream(buffer, 0, rb))
+                uredjaji = (List<Appliance>)formatter.Deserialize(ms);
+
+            // === MENI ===
+            while (true)
+            {
+                Console.WriteLine("\nUređaji:");
+                for (int i = 0; i < uredjaji.Count; i++)
+                    Console.WriteLine($"{i + 1}. {uredjaji[i].Name}");
+
+                Console.Write("Izaberi uređaj: ");
+                int idx = int.Parse(Console.ReadLine()) - 1;
+                Appliance a = uredjaji[idx];
+
+                Console.WriteLine("Funkcije:");
+                foreach (var f in a.Functions)
+                    Console.WriteLine($"{f.Key} = {f.Value}");
+
+                Console.Write("Funkcija: ");
+                string func = Console.ReadLine();
+                Console.Write("Nova vrijednost: ");
+                string val = Console.ReadLine();
+
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    formatter.Serialize(ms, a);
+                    formatter.Serialize(ms, func);
+                    formatter.Serialize(ms, val);
+                    udpSocket.SendTo(ms.ToArray(), serverUdp);
+                }
+
+                rb = udpSocket.ReceiveFrom(buffer, ref ep);
+                string poruka = Encoding.UTF8.GetString(buffer, 0, rb);
+                Console.WriteLine(poruka);
+
+                Console.Write("Još? (da/ne): ");
+                string dalje = Console.ReadLine();
+                udpSocket.SendTo(Encoding.UTF8.GetBytes(dalje), serverUdp);
+
+                if (dalje == "ne")
+                    break;
+
+                // server šalje NOVU listu
+                rb = udpSocket.ReceiveFrom(buffer, ref ep);
+                using (MemoryStream ms = new MemoryStream(buffer, 0, rb))
+                    uredjaji = (List<Appliance>)formatter.Deserialize(ms);
+            }
+
+            udpSocket.Close();
+            clientSocket.Close();
         }
     }
 }

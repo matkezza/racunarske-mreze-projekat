@@ -24,6 +24,8 @@ namespace ApplianceCommunication
             }
 
             Socket udpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            udpSocket.Bind(new IPEndPoint(IPAddress.Any, 0));
+
             IPEndPoint destinationEP = new IPEndPoint(IPAddress.Any, listenPort);
             udpSocket.Bind(destinationEP);
 
