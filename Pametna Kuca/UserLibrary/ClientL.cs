@@ -40,7 +40,7 @@ namespace UserLibrary
             {
                 if(client.Username == username && client.Password == password)
                 {
-                    client.Status = true;
+                    //client.Status = true;
                     return client;
                 }
             }
