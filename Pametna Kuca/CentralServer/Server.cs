@@ -23,6 +23,8 @@ namespace CentralServer
         private readonly List<ClientL> _users = new List<ClientL>();
         private readonly List<Appliance> _appliances = new List<Appliance>();
         private readonly List<string> _logs = new List<string>();
+        private const int MaxLogsKept = 500;
+        private const int LogsShown = 15;
 
         private int _nextUdpPort = 6000;
         private readonly int _tcpPort;
@@ -34,7 +36,7 @@ namespace CentralServer
         public static void Main(string[] args)
         {
             int tcpPort = 50001;
-            int inactivityCycles = 10;
+            int inactivityCycles = 1800; 
             int cycleMs = 1000;
 
             Server s = new Server(tcpPort, inactivityCycles, cycleMs);
@@ -53,7 +55,7 @@ namespace CentralServer
 
         private void SeedUsers()
         {
-            
+
             _users.Add(new ClientL("Matija", "Brkusanin", "matija", "1234", false, 0));
             _users.Add(new ClientL("Luka", "Kukic", "luka", "1234", false, 0));
             _users.Add(new ClientL("Test", "User", "test", "test", false, 0));
@@ -79,48 +81,91 @@ namespace CentralServer
 
             while (true)
             {
-                List<Socket> read = new List<Socket>();
-                read.Add(_listenTcp);
-
-                foreach (var c in _tcpClients.ToList())
-                    read.Add(c);
-
-                foreach (var s in _sessionsByUdpPort.Values.ToList())
-                    read.Add(s.UdpSocket);
-
-                Socket.Select(read, null, null, _cycleMs * 1000);
-
-                if (read.Count == 0)
+                try
                 {
+                    List<Socket> checkRead = new List<Socket>();
+                    List<Socket> checkError = new List<Socket>();
+
+                    checkRead.Add(_listenTcp);
+                    checkError.Add(_listenTcp);
+
+                    foreach (var c in _tcpClients.ToList())
+                    {
+                        checkRead.Add(c);
+                        checkError.Add(c);
+                    }
+
+                    foreach (var sess in _sessionsByUdpPort.Values.ToList())
+                    {
+                        checkRead.Add(sess.UdpSocket);
+                        checkError.Add(sess.UdpSocket);
+                    }
+
+                    
+                    Socket.Select(checkRead, null, checkError, _cycleMs * 1000);
+
+                    if (checkError.Count > 0)
+                    {
+                        foreach (var sock in checkError.ToList())
+                        {
+                            try
+                            {
+                                if (sock == _listenTcp)
+                                {
+                                    Log("TCP listen socket error.");
+                                    continue;
+                                }
+
+                                if (_tcpClients.Contains(sock))
+                                {
+                                    CloseTcpClient(sock, "Socket error");
+                                    continue;
+                                }
+
+                                var sessionErr = _sessionsByUdpPort.Values.FirstOrDefault(x => x.UdpSocket == sock);
+                                if (sessionErr != null)
+                                {
+                                    CloseSession(sessionErr, "UDP socket error");
+                                    continue;
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+
+                    if (checkRead.Count > 0)
+                    {
+                        foreach (var sock in checkRead.ToList())
+                        {
+                            if (sock == _listenTcp)
+                            {
+                                AcceptTcpClients();
+                                continue;
+                            }
+
+                            if (_tcpClients.Contains(sock))
+                            {
+                                ReceiveTcpFromClient(sock);
+                                continue;
+                            }
+
+                            var session = _sessionsByUdpPort.Values.FirstOrDefault(x => x.UdpSocket == sock);
+                            if (session != null)
+                            {
+                                HandleUdp(session);
+                                continue;
+                            }
+                        }
+                    }
+
                     TickInactivity();
                     RenderStatus();
-                    continue;
                 }
-
-                foreach (var sock in read)
+                catch (Exception ex)
                 {
-                    if (sock == _listenTcp)
-                    {
-                        AcceptTcpClients();
-                        continue;
-                    }
-
-                    if (_tcpClients.Contains(sock))
-                    {
-                        HandleTcp(sock);
-                        continue;
-                    }
-
-                    var session = _sessionsByUdpPort.Values.FirstOrDefault(x => x.UdpSocket == sock);
-                    if (session != null)
-                    {
-                        HandleUdp(session);
-                        continue;
-                    }
+                    Log($"FATAL(loop): {ex.GetType().Name}: {ex.Message}");
+                    Thread.Sleep(200);
                 }
-
-                TickInactivity();
-                RenderStatus();
             }
         }
 
@@ -144,6 +189,8 @@ namespace CentralServer
                 }
             }
         }
+        private void ReceiveTcpFromClient(Socket clientSocket) => HandleTcp(clientSocket);
+        private void CloseTcpClient(Socket clientSocket, string reason) => CloseTcp(clientSocket, reason);
 
         private void HandleTcp(Socket clientSocket)
         {
@@ -181,9 +228,6 @@ namespace CentralServer
             string username = parts[0];
             string password = parts[1];
 
-            Console.WriteLine(username);
-            Console.WriteLine(password);
-
             var user = new ClientL().FindClient(_users, username, password);
             if (user == null)
             {
@@ -192,7 +236,7 @@ namespace CentralServer
                 return;
             }
 
-            if (user.Status)    // ispraviti 
+            if (user.Status)
             {
                 SendTcp(clientSocket, "NEUSPESNO");
                 Log($"Login rejected (already active) for '{username}'");
@@ -218,9 +262,6 @@ namespace CentralServer
                 State = SessionState.WaitingForUdpHandshake
             };
             _sessionsByUdpPort[udpPort] = session;
-
-            //SendTcp(clientSocket, "USPESNO");
-            //SendTcp(clientSocket, udpPort.ToString());
 
             SendTcp(clientSocket, $"USPESNO:{udpPort}");
 
@@ -254,7 +295,7 @@ namespace CentralServer
             {
                 asText = Encoding.UTF8.GetString(buffer, 0, bytes).Trim();
             }
-            catch {  }
+            catch { }
 
             if (session.ClientUdpEndpoint == null)
             {
@@ -262,6 +303,11 @@ namespace CentralServer
                 session.State = SessionState.Active;
                 Log($"UDP handshake for '{session.User.Username}' on {session.UdpPort} from {session.ClientUdpEndpoint}");
                 SendApplianceList(session);
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(asText) && asText.Equals("PING", StringComparison.OrdinalIgnoreCase))
+            {
                 return;
             }
 
@@ -396,7 +442,7 @@ namespace CentralServer
                 byte[] b = Encoding.UTF8.GetBytes(text);
                 c.Send(b);
             }
-            catch {  }
+            catch { }
         }
 
         private void SendUdpText(Session session, string text)
@@ -429,39 +475,56 @@ namespace CentralServer
         {
             Console.Clear();
 
-            Console.WriteLine("=== CentralServer status ===");
-            Console.WriteLine($"TCP port: {_tcpPort} | Active TCP clients: {_tcpClients.Count} | Active sessions: {_sessionsByUdpPort.Count}");
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("==================== PAMETNA KUĆA | CENTRAL SERVER ====================");
+            Console.ResetColor();
+            Console.WriteLine($"TCP: {_tcpPort} | TCP clients: {_tcpClients.Count} | Sessions: {_sessionsByUdpPort.Count} | Tick: {_cycleMs}ms");
             Console.WriteLine();
 
-            Console.WriteLine(string.Format("{0,-12} {1,-8} {2,-22} {3,-8}", "Username", "UDP", "ClientEP", "Idle"));
-            Console.WriteLine(new string('-', 60));
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("[ACTIVE SESSIONS]");
+            Console.ResetColor();
+            Console.WriteLine(string.Format("{0,-12} {1,-6} {2,-26} {3,-6} {4,-10}", "Username", "UDP", "ClientEP", "Idle", "State"));
+            Console.WriteLine(new string('-', 70));
             foreach (var s in _sessionsByUdpPort.Values.OrderBy(v => v.User.Username))
             {
-                string ep = s.ClientUdpEndpoint != null ? s.ClientUdpEndpoint.ToString() : "(no udp)";
-                Console.WriteLine(string.Format("{0,-12} {1,-8} {2,-22} {3,-8}",
-                    s.User.Username, s.UdpPort, ep, s.InactiveCycles));
+                string ep = s.ClientUdpEndpoint != null ? s.ClientUdpEndpoint.ToString() : "(no udp yet)";
+                Console.WriteLine(string.Format("{0,-12} {1,-6} {2,-26} {3,-6} {4,-10}",
+                    s.User.Username, s.UdpPort, ep, s.InactiveCycles, s.State));
             }
 
             Console.WriteLine();
-            Console.WriteLine("=== Devices ===");
-            Console.WriteLine(string.Format("{0,-20} {1,-8} {2,-45} {3,-20}", "Name", "Port", "Functions", "LastChange"));
-            Console.WriteLine(new string('-', 100));
-            foreach (var a in _appliances)
-            {
-                string funcs = string.Join(", ", a.Functions.Select(f => $"{f.Key}:{f.Value}"));
-                Console.WriteLine(string.Format("{0,-20} {1,-8} {2,-45} {3,-20}", a.Name, a.Port, funcs, a.LastChange.ToString("yyyy-MM-dd HH:mm:ss")));
-            }
 
-            Console.WriteLine();
-            Console.WriteLine("=== Last logs ===");
             
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("[DEVICES | STATES]");
+            Console.ResetColor();
+            Console.WriteLine(string.Format("{0,-18} {1,-6} {2,-50} {3,-19}", "Name", "Port", "Functions", "LastChange"));
+            Console.WriteLine(new string('-', 100));
+            foreach (var a in _appliances.OrderBy(x => x.Port))
+            {
+                string funcs = string.Join(", ", a.Functions.Select(f => $"{f.Key}={f.Value}"));
+                if (funcs.Length > 50) funcs = funcs.Substring(0, 47) + "...";
+                Console.WriteLine(string.Format("{0,-18} {1,-6} {2,-50} {3,-19}", a.Name, a.Port, funcs, a.LastChange.ToString("yyyy-MM-dd HH:mm:ss")));
+            }
+
+            Console.WriteLine();
+
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("[LOGS | LAST MESSAGES]");
+            Console.ResetColor();
+            Console.WriteLine(new string('-', 100));
+            foreach (var l in _logs.Skip(Math.Max(0, _logs.Count - LogsShown)))
+            {
+                Console.WriteLine(l);
+            }
         }
 
         private void Log(string msg)
         {
             string line = $"[{DateTime.Now:HH:mm:ss}] {msg}";
             _logs.Add(line);
-            if (_logs.Count > 500) _logs.RemoveAt(0);
+            if (_logs.Count > MaxLogsKept) _logs.RemoveAt(0);
         }
 
         private void CloseTcp(Socket c, string reason)
@@ -470,6 +533,7 @@ namespace CentralServer
             try { c.Shutdown(SocketShutdown.Both); } catch { }
             try { c.Close(); } catch { }
             _tcpClients.Remove(c);
+            _pendingUsername.Remove(c);
         }
 
         private void CloseSession(Session s, string reason)
@@ -480,6 +544,8 @@ namespace CentralServer
             s.User.Port = 0;
 
             try { s.UdpSocket.Close(); } catch { }
+
+            try { CloseTcp(s.TcpSocket, "TCP closed (session end)"); } catch { }
 
             _sessionsByUdpPort.Remove(s.UdpPort);
         }
