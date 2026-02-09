@@ -311,13 +311,13 @@ namespace CentralServer
                 return;
             }
 
-            if (!string.IsNullOrEmpty(asText) && (asText.Equals("da", StringComparison.OrdinalIgnoreCase)))
+            if (!string.IsNullOrEmpty(asText) && (asText.Equals("yes", StringComparison.OrdinalIgnoreCase)))
             {
                 SendApplianceList(session);
                 return;
             }
 
-            if (!string.IsNullOrEmpty(asText) && (asText.Equals("ne", StringComparison.OrdinalIgnoreCase)))
+            if (!string.IsNullOrEmpty(asText) && (asText.Equals("no", StringComparison.OrdinalIgnoreCase)))
             {
                 SendUdpText(session, "Server is done with work.");
                 CloseSession(session, "Client requested logout");
