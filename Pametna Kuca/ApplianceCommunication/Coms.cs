@@ -12,34 +12,24 @@ namespace ApplianceCommunication
         static void Main(string[] args)
         {
             int listenPort = 0;
-            foreach (var arg in args)
+            if (args == null || args.Length == 0 || !int.TryParse(args[0], out listenPort) || listenPort <= 0)
             {
-                listenPort = Int32.Parse(arg);
-            }
-
-            if (listenPort == 0)
-            {
-                Console.WriteLine("Pokretanje: ApplianceCommunication.exe <PORT>");
+                Console.WriteLine("Pokretanje Appliance Communication.");
                 return;
             }
 
             Socket udpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            udpSocket.Bind(new IPEndPoint(IPAddress.Any, 0));
-
-            IPEndPoint destinationEP = new IPEndPoint(IPAddress.Any, listenPort);
-            udpSocket.Bind(destinationEP);
-
+            udpSocket.Bind(new IPEndPoint(IPAddress.Any, listenPort));
             EndPoint senderEP = new IPEndPoint(IPAddress.Any, 0);
-
             Appliance applianceSeed = new Appliance();
+            
             List<Appliance> appliances = applianceSeed.ListOfAppliances();
-
             Console.WriteLine($"[DEVICE] Listening on UDP port {listenPort}...");
 
             bool stop = false;
             while (!stop)
             {
-                byte[] buffer = new byte[4096];
+                byte[] buffer = new byte[65507];
                 try
                 {
                     int bytesReceived = udpSocket.ReceiveFrom(buffer, ref senderEP);
@@ -53,7 +43,7 @@ namespace ApplianceCommunication
 
                     Console.WriteLine($"[DEVICE:{listenPort}] From {senderEP} -> {receivedMessage}");
 
-                    // Expect: ApplianceName:Function:Value
+                    
                     string[] parts = receivedMessage.Split(':');
                     if (parts.Length < 3)
                     {
@@ -83,11 +73,11 @@ namespace ApplianceCommunication
 
                     target.AddCommand(func, val);
 
-                    // Pretty feedback to server
+                   
                     string feedback = $"{target.Name}: {func} postavljeno na '{val}'.";
                     SendFeedback(udpSocket, senderEP, feedback);
 
-                    // Print local state
+                    
                     Console.WriteLine(target.GetState());
                 }
                 catch (Exception ex)

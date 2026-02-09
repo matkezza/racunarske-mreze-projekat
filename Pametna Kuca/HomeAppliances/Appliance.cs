@@ -22,8 +22,8 @@ namespace HomeAppliances
             Name = name;
             Port = port;
             Functions = functions;
-            CommandList = new List<string>();
-            LastChange = DateTime.Now;
+            CommandList = commandList ?? new List<string>();
+            LastChange = lastChange;
         }
 
         public Appliance(string name, int port, Dictionary<string, string> functions)
@@ -90,6 +90,7 @@ namespace HomeAppliances
             foreach (var app in appliance) { 
                 string functions = string.Join(", ", app.Functions.Select(f => $"{f.Key}:{f.Value}"));
                 tabel += string.Format("{0,-20} {1,-10} {2,-30} {3,-20}", app.Name, app.Port, functions, app.LastChange);
+                tabel += "\n";
             }
             return tabel;
         }

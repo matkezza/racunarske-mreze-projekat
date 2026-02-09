@@ -218,11 +218,14 @@ namespace User
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Eventing.Reader;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
+using System.Threading;
 using HomeAppliances;
 
 namespace User
@@ -242,87 +245,271 @@ namespace User
             clientSocket.Connect(serverEP);
             Console.WriteLine("Povezan na server.");
 
-        LOGIN:
-            Console.Write("Username: ");
-            string u = Console.ReadLine();
-            Console.Write("Password: ");
-            string p = Console.ReadLine();
-
-            clientSocket.Send(Encoding.UTF8.GetBytes($"{u}:{p}"));
-            int rb = clientSocket.Receive(buffer);
-            odgovor = Encoding.UTF8.GetString(buffer, 0, rb);
-
-            if (!odgovor.StartsWith("USPESNO"))
+            try
             {
-                Console.WriteLine("Login neuspešan.");
+                clientSocket.Connect(serverEP);
+                Console.WriteLine("Povezan na server.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Doslo je do greske prilikom povezivanja na TCP server: " + ex.Message);
+                return;
+            }
+
+        LOGIN:
+            Console.Clear();
+            Console.WriteLine("============================= PAMETNA KUCA | KORISNIK ================================ ");
+            Console.WriteLine("Unesi kredencijale(format na serveru je username:password).\n");
+
+            Console.WriteLine("Username:");
+            string u = (Console.ReadLine() ?? "").Trim();
+            Console.WriteLine("Password:");
+            string p = (Console.ReadLine() ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(u) || string.IsNullOrWhiteSpace(p))
+            {
+                Console.WriteLine("Username/password ne smeju biti prazni. Pritisni ENTER...");
+                Console.ReadLine();
                 goto LOGIN;
             }
 
-            assignedPort = int.Parse(odgovor.Split(':')[1]);
+            try
+            {
+                clientSocket.Send(Encoding.UTF8.GetBytes($"{u}:{p}"));
+                int rb = clientSocket.Receive(buffer);
+                odgovor = Encoding.UTF8.GetString(buffer, 0, rb).Trim();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Greska pri loginu (TCP): " + ex.Message);
+                Console.WriteLine("Pritisni ENTER da pokusas ponovo...");
+                Console.ReadLine();
+                goto LOGIN;
+            }
+
+            if (!odgovor.StartsWith("USPESNO"))
+            {
+                Console.WriteLine("Login neuspesan.\nPritisni ENTER da pokusas ponovo...");
+                Console.ReadLine();
+                goto LOGIN;
+            }
+
+            int tmpPort;
+            if (!int.TryParse(odgovor.Split(':')[1], out tmpPort))
+            {
+                Console.WriteLine("Server vratio neispravan UDP port. Pritisni ENTER...");
+                Console.ReadLine();
+                goto LOGIN;
+            }
+
+            assignedPort = tmpPort;
             Console.WriteLine("Login OK. UDP port: " + assignedPort);
 
-            // UDP
+
             Socket udpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
             udpSocket.Bind(new IPEndPoint(IPAddress.Any, 0));
             EndPoint ep = new IPEndPoint(IPAddress.Any, 0);
             IPEndPoint serverUdp = new IPEndPoint(IPAddress.Loopback, assignedPort);
 
-            // javi se serveru
             udpSocket.SendTo(Encoding.UTF8.GetBytes("HELLO"), serverUdp);
 
-            // === PRVI I JEDINI PRIJEM LISTE ===
-            rb = udpSocket.ReceiveFrom(buffer, ref ep);
-            List<Appliance> uredjaji;
-            using (MemoryStream ms = new MemoryStream(buffer, 0, rb))
-                uredjaji = (List<Appliance>)formatter.Deserialize(ms);
 
-            // === MENI ===
-            while (true)
+            List<Appliance> uredjaji = null;
+            if (!TryReceiveDeviceList(udpSocket, formatter, ref ep, out uredjaji))
             {
-                Console.WriteLine("\nUređaji:");
-                for (int i = 0; i < uredjaji.Count; i++)
-                    Console.WriteLine($"{i + 1}. {uredjaji[i].Name}");
+                Console.WriteLine("Ne dobijam listu uredjaja (UDP handshake). Pritisni ENTER za ponovni login...");
+                SafeClose(udpSocket);
 
-                Console.Write("Izaberi uređaj: ");
-                int idx = int.Parse(Console.ReadLine()) - 1;
-                Appliance a = uredjaji[idx];
-
-                Console.WriteLine("Funkcije:");
-                foreach (var f in a.Functions)
-                    Console.WriteLine($"{f.Key} = {f.Value}");
-
-                Console.Write("Funkcija: ");
-                string func = Console.ReadLine();
-                Console.Write("Nova vrijednost: ");
-                string val = Console.ReadLine();
-
-                using (MemoryStream ms = new MemoryStream())
-                {
-                    formatter.Serialize(ms, a);
-                    formatter.Serialize(ms, func);
-                    formatter.Serialize(ms, val);
-                    udpSocket.SendTo(ms.ToArray(), serverUdp);
-                }
-
-                rb = udpSocket.ReceiveFrom(buffer, ref ep);
-                string poruka = Encoding.UTF8.GetString(buffer, 0, rb);
-                Console.WriteLine(poruka);
-
-                Console.Write("Još? (da/ne): ");
-                string dalje = Console.ReadLine();
-                udpSocket.SendTo(Encoding.UTF8.GetBytes(dalje), serverUdp);
-
-                if (dalje == "ne")
-                    break;
-
-                // server šalje NOVU listu
-                rb = udpSocket.ReceiveFrom(buffer, ref ep);
-                using (MemoryStream ms = new MemoryStream(buffer, 0, rb))
-                    uredjaji = (List<Appliance>)formatter.Deserialize(ms);
+                Console.ReadLine();
+                goto LOGIN;
             }
 
-            udpSocket.Close();
-            clientSocket.Close();
+            object udpSendLock = new object();
+
+            while(true)
+            {
+                Console.Clear();
+                Console.WriteLine("==================== PAMETNA KUĆA | KORISNIK ====================");
+                Console.WriteLine($"Aktivna sesija: {u} | Server UDP: {assignedPort}\n");
+
+                PrintDevices(uredjaji);
+                int idx = ReadIntInRange("Izaberi uredaj: ",1,uredjaji.Count)-1;
+                Appliance a = uredjaji[idx];
+
+                Console.WriteLine();
+                Console.WriteLine($"Uredjaj: {a.Name}");
+                Console.WriteLine("Funkcije (trenutne vrednosti):");
+                foreach(var f in a.Functions)
+                    Console.WriteLine($"-{f.Key} = {f.Value}");
+
+                string func = ReadNonEmpty("Funkcija: ");
+                string val = ReadNonEmpty("Nova vrednost: ");
+
+                try 
+                {
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                        formatter.Serialize(ms, a);
+                        formatter.Serialize(ms, func);
+                        formatter.Serialize(ms, val);
+                        lock (udpSendLock) { udpSocket.SendTo(ms.ToArray(), serverUdp);}
+
+                    }
+                }
+                catch(Exception ex)
+                {
+                    Console.WriteLine("Greska pri slanju komande: " + ex.Message);
+                    Console.WriteLine("Pritisni ENTER...");
+                    Console.ReadLine();
+                    continue;
+                }
+
+                string poruka;
+                if(!TryReceiveText(udpSocket,ref ep, out poruka, timeoutMs:4000))
+                {
+                    Console.WriteLine("Nema odgovora od servera.\nPritisnite ENTER...");
+                    Console.ReadLine();
+                    continue;
+                }
+
+                if (poruka.Trim().Equals("SESSION_EXPIRED", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine("Sesija je istekla zbog neaktivnosti. Pritisni ENTER za ponovni login.");
+                    SafeClose(udpSocket);
+                    Console.ReadLine();
+                    goto LOGIN;
+                }
+
+                Console.WriteLine();
+                Console.WriteLine("Odgovor servera: ");
+                Console.WriteLine(poruka);
+
+                string dalje = ReadChoice("\nJos komandi? (da/ne):","da","ne");
+                lock (udpSendLock) { udpSocket.SendTo(Encoding.UTF8.GetBytes(dalje), serverUdp); }
+
+                if(dalje == "ne")
+                {
+                    break;
+                }
+
+                if(!TryReceiveDeviceList(udpSocket,formatter,ref ep, out uredjaji))
+                {
+                    Console.WriteLine("Ne dobijam listu uredjaja. Pritisnite ENTER...");
+                    Console.ReadLine();
+
+                }
+                SafeClose(udpSocket);
+                SafeClose(clientSocket);
+            }
+
         }
+
+
+        private static void PrintDevices(List<Appliance> uredjaji)
+        {
+            Console.WriteLine("Uređaji:");
+            Console.WriteLine(new string('-', 70));
+            for (int i = 0; i < uredjaji.Count; i++)
+            {
+                var a = uredjaji[i];
+                string state = string.Join(", ", a.Functions.Select(kv => $"{kv.Key}={kv.Value}"));
+                if (state.Length > 45) state = state.Substring(0, 42) + "...";
+                Console.WriteLine($"{i + 1,2}. {a.Name,-18} | port {a.Port,-5} | {state}");
+            }
+            Console.WriteLine(new string('-', 70));
+        }
+
+        private static bool TryReceiveDeviceList(Socket udp, BinaryFormatter formatter, ref EndPoint ep, out List<Appliance> devices)
+        {
+            devices = null;
+            byte[] buf = new byte[65507];
+            int bytes;
+            if (!udp.Poll(3000 * 1000, SelectMode.SelectRead))
+                return false;
+            try
+            {
+                bytes = udp.ReceiveFrom(buf, ref ep);
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (bytes <= 0) return false;
+
+            try
+            {
+                using (MemoryStream ms = new MemoryStream(buf, 0, bytes))
+                    devices = (List<Appliance>)formatter.Deserialize(ms);
+                return devices != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReceiveText(Socket udp, ref EndPoint ep, out string text, int timeoutMs)
+        {
+            text = null;
+            byte[] buf = new byte[65507];
+            if (!udp.Poll(timeoutMs * 1000, SelectMode.SelectRead))
+                return false;
+            int bytes;
+            try
+            {
+                bytes = udp.ReceiveFrom(buf, ref ep);
+            }
+            catch
+            {
+                return false;
+            }
+            if (bytes <= 0) return false;
+            text = Encoding.UTF8.GetString(buf, 0, bytes);
+            return true;
+        }
+
+        private static int ReadIntInRange(string prompt, int min, int max)
+        {
+            while (true)
+            {
+                Console.Write(prompt);
+                string s = (Console.ReadLine() ?? "").Trim();
+                int v;
+                if (int.TryParse(s, out v) && v >= min && v <= max)
+                    return v;
+                Console.WriteLine($"Unesi broj između {min} i {max}.");
+            }
+        }
+
+        private static string ReadNonEmpty(string prompt)
+        {
+            while (true)
+            {
+                Console.Write(prompt);
+                string s = (Console.ReadLine() ?? "").Trim();
+                if (!string.IsNullOrWhiteSpace(s)) return s;
+                Console.WriteLine("Ne sme biti prazno.");
+            }
+        }
+
+        private static string ReadChoice(string prompt, string a, string b)
+        {
+            while (true)
+            {
+                Console.Write(prompt);
+                string s = (Console.ReadLine() ?? "").Trim().ToLower();
+                if (s == a || s == b) return s;
+                Console.WriteLine($"Unesi '{a}' ili '{b}'.");
+            }
+        }
+
+        private static void SafeClose(Socket s)
+        {
+            if (s == null) return;
+            try { s.Shutdown(SocketShutdown.Both); } catch { }
+            try { s.Close(); } catch { }
+        }
+
     }
 }
